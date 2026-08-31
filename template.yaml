@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Serverless RAG document Q&A API. Two Lambda functions behind API Gateway
+  (ingest a document, query it) backed by a DynamoDB table for chunks and
+  Amazon Bedrock for embeddings + generation.
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    MemorySize: 512
+    Timeout: 30
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref ChunksTable
+
+Resources:
+  ChunksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: documentId
+          AttributeType: S
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: documentId
+          KeyType: HASH
+        - AttributeName: id
+          KeyType: RANGE
+
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/src/handlers/ingest-entry.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ChunksTable
+        - Statement:
+            - Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource: "*"
+      Events:
+        Ingest:
+          Type: Api
+          Properties:
+            Path: /documents
+            Method: post
+
+  QueryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/src/handlers/query-entry.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ChunksTable
+        - Statement:
+            - Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource: "*"
+      Events:
+        Query:
+          Type: Api
+          Properties:
+            Path: /query
+            Method: post
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the deployed API
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
